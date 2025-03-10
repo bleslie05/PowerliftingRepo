@@ -1,0 +1,343 @@
+---
+title: "Project 1 - Powerlifting"
+author: "Brandon Leslie"
+format: 
+  revealjs:
+    theme: night
+    scrollable: true
+---
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE, 
+                      message = FALSE, 
+                      warning = FALSE
+                      )
+
+```
+
+
+```{r include = FALSE}
+library(tidyverse)
+library(tidymodels)
+library(tinytex)
+library(knitr)
+power <- read_csv("/Users/blove/Downloads/DSC-260/Proj1/data/PowerRaw.csv")
+
+```
+
+```{r}
+
+power <- power %>% 
+  group_by(Name) %>% 
+  mutate(
+    BestBenchKg = max(Best3BenchKg),
+    BestSquatKg = max(Best3SquatKg),
+    BestDeadliftKg = max(Best3DeadliftKg),
+    TotalKg = max(TotalKg)
+  ) 
+# Making new columns that show the best lift of all individuals. 
+
+power <- power %>% 
+  select(Name, Sex, Equipment, Age, BodyweightKg, BestSquatKg, BestBenchKg, BestDeadliftKg, TotalKg) %>%
+  drop_na() %>%
+  filter(Age >= 8) %>% 
+  filter(TotalKg == max(TotalKg)) %>% 
+  distinct(Name, .keep_all = TRUE)
+
+power$Equipment <- as.factor(power$Equipment)
+
+power$Equipment <- fct_relevel(power$Equipment, "Raw", "Wraps", "Single-ply", "Multi-ply", "Unlimited")
+
+power <- power %>% 
+  mutate(
+    WeightClass = cut(BodyweightKg,
+                      breaks = seq(0, 315, by = 45),
+                      labels = paste(seq(0, 270, by = 45), seq(45, 315, by = 45), sep = "-"),
+                      right = FALSE),
+    AgeClass = cut(Age, 
+                   breaks = c(0, 10, 15, 20, 30, 40, 50 , 60, 70, 80, Inf),
+                   labels = c("0-9", "10-15", "16-20", "21-30", "31-40", 
+                                      "41-50", "51-60", "61-70", "71-80", "81+"),
+                           right = FALSE),
+    p4p = (TotalKg / BodyweightKg)
+)
+# Creating new age/weight classes, also creating a new strength indicator (p4p)    
+```
+
+
+```{r}
+q1_plot_weight <- function(data, x_var, y_var, title, x_label, y_label, maxY, lineY) {
+  data %>%
+    ggplot(aes_string(x = x_var, y = y_var)) +
+    geom_bin_2d(aes(fill = Sex)) +
+    geom_vline(xintercept = seq(0, 270, by = 45), color = "black", linewidth = .5, alpha = 0.8) +
+    geom_hline(yintercept = seq(0, maxY, by = lineY), color = "black", linewidth = .5, alpha = 0.8) +
+    geom_smooth(color = "white", method = "gam", se = FALSE, linetype = "dashed") +
+    facet_wrap(~Equipment) +
+    labs(
+      title = title,
+      subtitle = "Faceted by Equipment",
+      x = x_label,
+      y = y_label
+    ) +
+    theme_dark() +
+    scale_x_continuous(breaks = breaks_width(45)) +
+    scale_y_continuous(breaks = breaks_width(200), limits = c(0,maxY)) +
+    scale_fill_manual(values = c("M" = "blue", "F" = "red", "Mx" = "green")) +
+    theme(panel.border = element_rect(color = "black", fill = NA, size = 1.5, linetype = "longdash"),
+          axis.text = element_text(face = "bold"))
+}
+
+q1_plot_age <- function(data, x_var, y_var, title, x_label, y_label, maxY, lineY) {
+  data %>%
+    ggplot(aes_string(x = x_var, y = y_var)) +
+    geom_bin_2d(aes(fill = Sex)) +
+    geom_vline(xintercept = seq(0, 90, by = 10), color = "black", linewidth = .5, alpha = 0.8) +
+    geom_hline(yintercept = seq(0, maxY, by = lineY), color = "black", linewidth = .5, alpha = 0.8) +
+        geom_smooth(color = "white", method = "gam", se = FALSE, linetype = "dashed") + 
+    facet_wrap(~Equipment) +
+    labs(
+      title = title,
+      subtitle = "Faceted by Equipment",
+      x = x_label,
+      y = y_label
+    ) +
+    theme_dark() +
+    scale_x_continuous(breaks = breaks_width(10)) +
+    scale_y_continuous(breaks = breaks_width(200), limits = c(0,maxY)) +
+    scale_fill_manual(values = c("M" = "blue", "F" = "red", "Mx" = "green")) +
+    theme(panel.border = element_rect(color = "black", fill = NA, size = 1, linetype = "longdash"),
+          axis.text = element_text(face = "bold")
+) 
+}
+
+# Makes functions for the plots/leaders so code is more efficient. 
+# Using slice_max instead of filter to keep the top 3 instead of just top 1.
+
+weightclass_leaders <- function(data, lift_column, top_n = 3) {
+  data %>%
+    group_by(WeightClass, Sex) %>%
+    slice_max(order_by = .data[[lift_column]], n = top_n, with_ties = FALSE) %>%
+    arrange(desc(WeightClass), Sex, .data[[lift_column]]) %>%
+    select(Name, all_of(lift_column), BodyweightKg, Sex, p4p, Age, Equipment) %>% 
+        kable(caption = paste("Top", top_n, "Lifters by Weight Class"), digits = 2)
+
+}
+
+ageclass_leaders <- function(data, lift_column, top_n = 3) {
+  data %>%
+    group_by(AgeClass, Sex) %>%
+    slice_max(order_by = .data[[lift_column]], n = top_n, with_ties = FALSE) %>%
+    arrange((AgeClass), Sex, .data[[lift_column]]) %>%
+    select(Name, all_of(lift_column), BodyweightKg, Sex, p4p, Age, Equipment) %>% 
+        kable(caption = paste("Top", top_n, "Lifters by Age Class"), digits = 2)
+
+}
+
+leaders_general <- function(data, lift_column, top_n = 3) {
+  data %>% 
+  group_by(Sex, WeightClass) %>%
+    slice_max(order_by = .data[[lift_column]], n = top_n, with_ties = FALSE) %>%
+    arrange(desc(WeightClass), Sex, .data[[lift_column]]) %>%
+    select(Name, all_of(lift_column), BodyweightKg, Sex, p4p, Age, Equipment) %>% 
+        kable(caption = paste("Top", top_n, "Lifters Overall"), digits = 2)
+
+}
+
+```
+# Introduction
+## About The Data
+
+<hr>
+
+This report utilizes a database with ~3 million records of powerlifting meet data worldwide. Powerlifting, a globally and nationally competed sport, involves lifters maximizing weight in three key lifts over a set period (typically six months). These lifts, recognized as strength benchmarks, have existed for over a century.
+
+## Key Lifts
+
+These lifts include...
+
+-   **Barbell Bench Press** \| An upper-body lift using the chest, triceps, and shoulders to press a barbell off the chest. A good lift is smooth, level, and free of excessive glute movement.
+
+<hr>
+
+-   **Barbell Back Squat**\| A lower-body lift engaging the quads, glutes, and core to squat a barbell from the shoulders. Proper form includes good posture, smooth motion, and depth (knee crease below 90°).
+
+<hr>
+
+-   **Barbell Deadlift**\| A full-body lift pulling a barbell from the ground to lockout. A good deadlift is smooth, with minimal jerking and proper posture.
+
+
+## Questions
+
+After inspecting this data, I have been left with two questions:
+
+1.  **What is the difference between Age & Weight classes on their progression from Raw to Unlimited equipment lifts? Why might this be?**
+
+<hr>
+
+2.  **What is the difference of pound-for-pound strength versus total strength when looking at different weight classes? Why might this be?**
+
+# Question One:
+<hr>
+**What is the difference between Age & Weight classes on their progression from Raw to Unlimited equipment lifts? Why might this be?**
+
+## Overview
+
+Aims to see how progressing equipment levels affect the performance of different Age & Weight classes.
+
+## Q1 | Visulization - Weight 
+
+Total Leaders/Visualizations by Weight  
+
+
+```{r}
+q1_plot_weight(power, "BodyweightKg", "TotalKg", "Total By Weight", "Weight-(kg)", "Total-(kg)", 1300, 200)
+
+```
+
+## Q1 | Data - Weight 
+
+```{r}
+weightclass_leaders(power, "TotalKg")
+```
+
+
+## Q1 | Visulization - Age
+
+
+```{r}
+q1_plot_age(power, "Age", "TotalKg", "Best Total by Age", "Age", "Total (kg)", 1300, 200)
+```
+
+## Q1 | Data - Age
+
+```{r}
+ageclass_leaders(power, "TotalKg")
+```
+
+
+## Conclusions
+
+- Weight and age categories show substantial differences as lifters transition into better equipped lifts.
+
+<hr>
+
+- Equipment appears to have little effect on strength gains.
+
+<hr>
+
+- The greatest strength development is seen in the 10-20 years age group, with peaks in strength in the subsequent age group, then declining after that.
+
+<hr>
+
+- This is observed across all types of machinery.
+
+<hr>
+
+- In weight classes, Multi-ply and Unlimited equipment show more linear strength progress.
+
+<hr>
+
+- There is no clear advantage to equipping since most top players use very little equipment.
+Overall, age and weight classes are more relevant to strength gains than equipment.
+
+
+# Question Two:
+<hr>
+**What is the difference of pound-for-pound strength versus total strength when looking at different weight classes? Why might this be?**
+
+## Overview
+Aims to compare two different metrics of strength across different weight classes:
+
+- **Total**
+  - Cumulative weight of lifters lifts (Bench, Squat, Deadlift)
+
+<hr> 
+
+- **Pound-for-Pound Ratio** (p4p)
+  - A lifters total divided by their body weight, great indicator of strength for those who may be genetically disadvantaged. 
+
+## Q2 | Visulization - Total
+
+```{r}
+power %>% 
+ ggplot(aes(x = BodyweightKg, y = TotalKg)) +
+  geom_smooth(aes(color = Sex, linetype = Sex), method = "gam", se = FALSE) +
+  geom_vline(xintercept = seq(0, 270, by = 45), color = "black", linewidth = .5, alpha = 0.8) +
+  geom_hline(yintercept = seq(0, 1300, by = 200), color = "black", linewidth = .5, alpha = 0.8) +
+  theme_dark() +
+    scale_x_continuous(breaks = breaks_width(45)) +
+    scale_y_continuous(breaks = breaks_width(200), limits = c(0,NA)) +
+    scale_color_manual(values = c("M" = "blue", "F" = "red", "Mx" = "green")) +
+  labs(
+    title = "Total by Bodyweight",
+    x = "Bodyweight-(kg)",
+    y = "Total-(kg)"
+  ) +
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1.5, linetype = "longdash"),
+        axis.text = element_text(face = "bold"))
+```
+
+## Q2 | Data - Total
+
+```{r}
+leaders_general(power, "TotalKg")
+```
+
+
+## Q2 | Visulization - p4p
+```{r}
+power %>% 
+ ggplot(aes(x = BodyweightKg, y = p4p)) +
+  geom_smooth(aes(color = Sex, linetype = Sex), method = "gam", se = FALSE) +
+  geom_vline(xintercept = seq(0, 270, by = 45), color = "black", linewidth = .5, alpha = 0.8) +
+  geom_hline(yintercept = seq(0, 8, by = 1), color = "black", linewidth = .5, alpha = 0.8) +
+  theme_dark() +
+    scale_x_continuous(breaks = breaks_width(45)) +
+    scale_y_continuous(breaks = breaks_width(1), limits = c(0,8)) +
+    scale_color_manual(values = c("M" = "blue", "F" = "red", "Mx" = "green")) +
+  labs(
+    title = "p4p Ratio by Bodyweight",
+    x = "Bodyweight-(kg)",
+    y = "p4p Ratio"
+  ) +
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1.5, linetype = "longdash"),
+        axis.text = element_text(face = "bold"))
+
+```
+
+
+## Q2 | Data - p4p
+```{r}
+leaders_general(power, "p4p")
+```
+
+
+## Conclusions
+
+- Lower-weight classes tend to show greater p4p strength potential in elite lifters.
+
+<hr>
+
+- Higher-weight classes see a decrease in p4p strength but an increase in total strength.
+
+<hr>
+
+- p4p and total strength changes are not proportional but somewhat perpendicular.
+
+<hr>
+
+- Strength doesn’t directly correlate with weight but with the "type" of weight (e.g., muscular vs. adipose tissue).
+
+<hr>
+
+- A lifter with more active weight (muscle/skeleton) is likely stronger than one with passive weight (fat).
+
+<hr>
+
+- Weight is not a direct indicator of strength; too much weight can be detrimental.
+
+<hr>
+
+- In powerlifting meets where p4p is used, excessive weight can hinder performance, as it affects the p4p ratio rather than total lifted weight.
+
+# [Data Sourced Here](https://www.kaggle.com/datasets/open-powerlifting/powerlifting-database)

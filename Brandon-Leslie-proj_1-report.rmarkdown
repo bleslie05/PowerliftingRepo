@@ -1,0 +1,427 @@
+---
+title: "Project 1 - Powerlifting Data"
+author: "Brandon Leslie"
+format: pdf
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE, 
+                      message = FALSE, 
+                      warning = FALSE, 
+                      fig.width = 7
+                      )
+```
+
+```{r include = FALSE}
+library(tidyverse)
+library(tidymodels)
+library(tinytex)
+library(knitr)
+power <- read_csv("/Users/blove/Downloads/DSC-260/Proj1/data/PowerRaw.csv")
+
+```
+
+
+
+# Introduction
+
+This report utilizes a [database](https://www.kaggle.com/datasets/open-powerlifting/powerlifting-database) that consists of around 3 million observations of different metrics of meet data from power lifters across the globe. Powerlifting is a sport competed at the Global & National level. In a power lifting meet, lifters are given a period of time (usually 6 months) to lift as most weight as possible in 3 lifts. These lifts are seen as the pinnacle of strength standards worldwide, and have existed for more than a century! These lifts include:
+
+-   **The Barbell Bench Press**
+
+    -   Upper Body Dominant, primarily uses the Chest, Triceps, Shoulders, in order to lift a barbell of a certain weight off the chest. A good bench press is seen as smooth, well-leveled barbell, with little to no extraneous movement from the Glutes.
+
+-   **The Barbell Back Squat**
+
+    -   Lower Body Dominant, Primarily uses the Quads, Glutes, & Core to lift a barbell of certain weight in a squatting motion off the shoulders/traps. A Good Barbell Back-Squat lift consists of good posture, smooth movement, and good depth (knee crease reach below 90 degrees).
+
+-   **The Barbell Deadlift**
+
+    -   Arguably the staple of power lifting, the Deadlift requires the coordination of the whole body in order to successfully lift a barbell of certain weight off the ground, to proper lockout. A good Deadlift is seen as smooth, little to no "jerking," the weight up, and with good-fair posture.
+
+Lifters are given around 3 attempts to lift the most amount of weight possible per lift, which is progressive. These attempts must meet certain standards, or else their "lift," becomes disqualified. This disqualification comes from judges, and it only takes one judge to disqualify a lift. Lifters can be disqualified for others reasons as well (illegal drugs, using equipment when not allowed, not meeting weight, etc.) These lifts then get their lifts added up to a **total**, which consists of their heaviest Squat, Deadlift, and Bench Press. It is important to note that each lift is only counted once, and that each lifter gets the same amount of lifts to attempt. Some meets can be done with equipment, or without (raw).
+
+Equipment usually will improve the amount of weight you can lift by assisting certain muscles that fatigue more quickly then your primary muscle movers. Lifters are categorized by sex, weight class, and sometimes age class. Generally, the higher the weight-class, the higher the total. The lower the weight class, the higher the pound-for-pound ratio **(Total / Body weight)**.
+
+Two questions I've come up with while reviewing this data are...
+
+1.  **What is the difference between Age & Weight classes on their progression from Raw to Unlimited equipment lifts? Why might this be?**
+
+2.  **What is the difference of pound-for-pound strength versus total strength when looking at different weight classes? Why might this be?**
+
+This data consists of a lot of NA variables, especially in the some of the lift columns (Best1SquatKg, Best2DeadliftKg, etc.). We'll be removing ALL character columns (except name) as those are just identifying variables, that don't exactly aid the questions we're trying to answer. We need to to remove these vectors first, because we want to keep all the rows with complete lift data. There are many rows that have NA values in their identifier columns, so including the **drop_na()** function after we de-select all of these rows helps us retain the the most lift data we can.
+
+I'll also be creating three new columns, AgeClass, WeightClass, and p4p (Pound For Pound). **Pound for Pound is the ratio of a lifter's Total / Body Weight**. Pound for Pound is a great indicator of strength for those who aren't able to achieve "heavyweight" status.
+
+Last but not least, I'll be incorporating some **functions** into the code so I don't have to copy and paste the same line of code 10 times. The use of functions reduces the lines of code I have to write. these and are great for when I want to make an individual change to the structure of a visualization/dataframe without having to change every iteration of the code.
+
+
+
+```{r}
+
+power <- power %>% 
+  group_by(Name) %>% 
+  mutate(
+    BestBenchKg = max(Best3BenchKg),
+    BestSquatKg = max(Best3SquatKg),
+    BestDeadliftKg = max(Best3DeadliftKg),
+    TotalKg = max(TotalKg)
+  ) 
+# Making new columns that show the best lift of all individuals. 
+
+power <- power %>% 
+  select(Name, Sex, Equipment, Age, BodyweightKg, BestSquatKg, BestBenchKg, BestDeadliftKg, TotalKg) %>%
+  drop_na() %>%
+  filter(Age >= 8) %>% 
+  filter(TotalKg == max(TotalKg)) %>% 
+  distinct(Name, .keep_all = TRUE)
+
+# Selecting certain columns that are crucial to this data analysis. Dropping all rows with NA observations first, removing anyone under the age of 8 because certain metrics seem questionable under that age group, keeping the max totals for observations, and making sure every observation has a unique name (one observation per person)
+
+power$Equipment <- as.factor(power$Equipment)
+
+power$Equipment <- fct_relevel(power$Equipment, "Raw", "Wraps", "Single-ply", "Multi-ply", "Unlimited")
+
+# Re-coding & Re-leveling equipment in order of least equipped to most equipped. 
+
+power <- power %>% 
+  mutate(
+    WeightClass = cut(BodyweightKg,
+                      breaks = seq(0, 315, by = 45),
+                      labels = paste(seq(0, 270, by = 45), seq(45, 315, by = 45), sep = "-"),
+                      right = FALSE),
+    AgeClass = cut(Age, 
+                   breaks = c(0, 10, 15, 20, 30, 40, 50 , 60, 70, 80, Inf),
+                   labels = c("0-9", "10-15", "16-20", "21-30", "31-40", 
+                                      "41-50", "51-60", "61-70", "71-80", "81+"),
+                           right = FALSE),
+    p4p = (TotalKg / BodyweightKg)
+)
+# Creating new age/weight classes, also creating a new strength indicator (p4p)    
+```
+
+
+
+# Question 1
+
+## **What is the difference between Age & Weight classes on their progression from Raw to Unlimited equipment lifts? Why might this be?**
+
+***Overview***
+
+As a lifter wears more equipment, generally, their total increases. However, weight & age have indirect implications of strength. While these metrics are more observant than indicative (i.e. all water is H20 but not all H20 is water), they can help us gain insight on the limits of strength/potential when looking at elite power-lifters.
+
+***Graphs***
+
+I'll be using a **2d Bin Graph** to express this data in terms of density, rather then just regular points (200,000 observations is allot!). I'll also be comparing the shape & structure that these density plots make, as well as creating a best fit line to highlight the general trend among the data. I'll use the "gam" (General Additive Model) method for geom_smooth(), as it is best for data-sets with a high count of observations. Lastly, I'll manually create **"Class-Cages",** in order to better visualize the different Classes. It is also important to note that the Colors are not to scale when comparing the population of different Sex's.
+
+***Data/Leaders***
+
+Given the vast quantity of observations, I'll display the *top 3* strongest lifters in each Class *(Weight, Age, and Sex)*.
+
+
+
+```{r}
+q1_plot_weight <- function(data, x_var, y_var, title, x_label, y_label, maxY, lineY) {
+  data %>%
+    ggplot(aes_string(x = x_var, y = y_var)) +
+    geom_bin_2d(aes(fill = Sex)) +
+    geom_vline(xintercept = seq(0, 270, by = 45), color = "black", linewidth = .5, alpha = 0.8) +
+    geom_hline(yintercept = seq(0, maxY, by = lineY), color = "black", linewidth = .5, alpha = 0.8) +
+    geom_smooth(color = "white", method = "gam", se = FALSE, linetype = "dashed") +
+    facet_wrap(~Equipment) +
+    labs(
+      title = title,
+      subtitle = "Faceted by Equipment",
+      x = x_label,
+      y = y_label
+    ) +
+    theme_dark() +
+    scale_x_continuous(breaks = breaks_width(45)) +
+    scale_y_continuous(breaks = breaks_width(200), limits = c(0,maxY)) +
+    scale_fill_manual(values = c("M" = "blue", "F" = "red", "Mx" = "green")) +
+    theme(panel.border = element_rect(color = "black", fill = NA, size = 1.5, linetype = "longdash"),
+          axis.text = element_text(face = "bold"))
+}
+
+q1_plot_age <- function(data, x_var, y_var, title, x_label, y_label, maxY, lineY) {
+  data %>%
+    ggplot(aes_string(x = x_var, y = y_var)) +
+    geom_bin_2d(aes(fill = Sex)) +
+    geom_vline(xintercept = seq(0, 90, by = 10), color = "black", linewidth = .5, alpha = 0.8) +
+    geom_hline(yintercept = seq(0, maxY, by = lineY), color = "black", linewidth = .5, alpha = 0.8) +
+        geom_smooth(color = "white", method = "gam", se = FALSE, linetype = "dashed") + 
+    facet_wrap(~Equipment) +
+    labs(
+      title = title,
+      subtitle = "Faceted by Equipment",
+      x = x_label,
+      y = y_label
+    ) +
+    theme_dark() +
+    scale_x_continuous(breaks = breaks_width(10)) +
+    scale_y_continuous(breaks = breaks_width(200), limits = c(0,maxY)) +
+    scale_fill_manual(values = c("M" = "blue", "F" = "red", "Mx" = "green")) +
+    theme(panel.border = element_rect(color = "black", fill = NA, size = 1, linetype = "longdash"),
+          axis.text = element_text(face = "bold")
+) 
+}
+
+# Makes functions for the plots/leaders so code is more efficient. 
+# Using slice_max instead of filter to keep the top 3 instead of just top 1.
+
+weightclass_leaders <- function(data, lift_column, top_n = 3) {
+  data %>%
+    group_by(WeightClass, Sex) %>%
+    slice_max(order_by = .data[[lift_column]], n = top_n, with_ties = FALSE) %>%
+    arrange(desc(WeightClass), Sex, .data[[lift_column]]) %>%
+    select(Name, all_of(lift_column), BodyweightKg, Sex, p4p, Age, Equipment) %>% 
+    kable(caption = paste("Top", top_n, "Lifters by Weight Class"), digits = 2)
+}
+
+ageclass_leaders <- function(data, lift_column, top_n = 3) {
+  data %>%
+    group_by(AgeClass, Sex) %>%
+    slice_max(order_by = .data[[lift_column]], n = top_n, with_ties = FALSE) %>%
+    arrange((AgeClass), Sex, .data[[lift_column]]) %>%
+    select(Name, all_of(lift_column), BodyweightKg, Sex, p4p, Age, Equipment) %>% 
+        kable(caption = paste("Top", top_n, "Lifters by Age Class"), digits = 2)
+}
+
+leaders_general <- function(data, lift_column, top_n = 3) {
+  data %>% 
+  group_by(Sex, WeightClass) %>%
+    slice_max(order_by = .data[[lift_column]], n = top_n, with_ties = FALSE) %>%
+    arrange(desc(WeightClass), Sex, .data[[lift_column]]) %>%
+    select(Name, all_of(lift_column), BodyweightKg, Sex, p4p, Age, Equipment) %>% 
+        kable(caption = paste("Top", top_n, "Lifters Overall"), digits = 2)
+}
+
+```
+
+
+
+### **Total**
+
+#### By Weight
+
+
+
+```{r}
+q1_plot_weight(power, "BodyweightKg", "TotalKg", "Total By Weight", "Weight-(kg)", "Total-(kg)", 1300, 200)
+
+```
+
+
+
+#### By Age
+
+
+
+```{r}
+q1_plot_age(power, "Age", "TotalKg", "Best Total by Age", "Age", "Total (kg)", 1300, 200)
+```
+
+
+
+#### Total Leaders
+
+
+
+```{r}
+weightclass_leaders(power, "TotalKg")
+ageclass_leaders(power, "TotalKg")
+```
+
+
+
+### **Bench**
+
+#### By Weight
+
+
+
+```{r}
+q1_plot_weight(power, "BodyweightKg", "BestBenchKg", "Best Bench by Weight", "Weight-(kg)", "Bench-(kg)", 500, 100)
+
+```
+
+
+
+#### By Age
+
+
+
+```{r}
+q1_plot_age(power, "Age", "BestBenchKg", "Best Bench by Age", "Age", "Bench-(kg)", 500, 100)
+
+```
+
+
+
+#### Bench Leaders
+
+
+
+```{r}
+weightclass_leaders(power, "BestBenchKg")
+ageclass_leaders(power, "BestBenchKg")
+```
+
+
+
+### **Squat**
+
+#### By weight
+
+
+
+```{r}
+q1_plot_weight(power, "BodyweightKg", "BestSquatKg", "Best Squat by Weight", "Weight-(kg)", "Squat-(kg)", 500, 100)
+
+```
+
+
+
+#### By Age
+
+
+
+```{r}
+q1_plot_age(power, "Age", "BestSquatKg", "Best Squat by Age", "Age", "Squat-(kg)", 500, 100)
+
+```
+
+
+
+#### Squat Leaders
+
+
+
+```{r}
+weightclass_leaders(power, "BestSquatKg")
+ageclass_leaders(power, "BestSquatKg")
+```
+
+
+
+### **Dead-Lift**
+
+#### By weight
+
+
+
+```{r}
+q1_plot_weight(power, "BodyweightKg", "BestDeadliftKg", "Best Dead-Lift by Weight", "Weight-(kg)", "Dead-Lift-(kg)", 500, 100)
+
+```
+
+
+
+#### By Age
+
+
+
+```{r}
+q1_plot_age(power, "Age", "BestDeadliftKg", "Best Dead-Lift by Age", "Age", "Dead-Lift-(kg)", 500, 100)
+
+```
+
+
+
+#### Dead-Lift Leaders
+
+
+
+```{r}
+weightclass_leaders(power, "BestDeadliftKg")
+ageclass_leaders(power, "BestDeadliftKg")
+```
+
+
+
+### Conclusion
+
+There is notable difference on age & Weight classes as they progress through more equipped lifts. However, it seems that equipment barely plays a role in this progression of strength. For example, the highest slope for increasing strength is seen in the Age-class group, specifically those who are between the ages of 10-20. This peak of strength is seen in the next age bracket, and lifters begin to have their strength diminish soon there-after. This trend seems to be consistent no-matter what class of equipment is used. 
+
+However for weight-classes, as lifters progress through their usage of equipment, there are two equipment classes (Multi-ply & unlimited) where this trend takes a more linear form. This although isn't convincing to say that there is a clear advantage to using equipment, especially when the top performers tend to not use as much equipment.
+
+In conclusion, it seems that there is a notable difference on age & Weight classes as they progress throughout more equipped lifts, however, the dominant factor does NOT seem to be equipment. 
+
+
+
+# Question 2
+
+## **What is the difference of pound-for-pound strength versus total strength when looking at different weight classes? Why might this be?**
+
+***Overview***
+
+This question looks to compare two different metrics of strength, and how weight plays a role in this. It is a common misconception that the heavier you are, the stronger you are. For the everyday person who does not lift, this rationale can make some sense.However, when properly trained, the human body has the potential to lift massive amounts of weight! This questions aims to see which different metrics of Strength (total & p4p), best represent their ability. This question also aims to see why might some of these causes be, and opens the door to research of unknown predictors that might play a role in Strength.
+
+***Graphs***
+For these graphs, I'll just be using a regular geom_smooth() function to illustrate the trend amongst increasing weight classes across Total & p4p strength. I'll use the gam method once again, and give every Sex their own line/line-type. I'll also be manually creating "class-cages," for both the X & Y axis. 
+
+***Data/Leaders***
+Similar for question 1, I'll be showing the top 3 lifters for each Sex, in each Weight class per Strength Metric.   
+
+### Pound 4 Pound
+
+
+
+```{r}
+power %>% 
+ ggplot(aes(x = BodyweightKg, y = p4p)) +
+  geom_smooth(aes(color = Sex, linetype = Sex), method = "gam", se = FALSE) +
+  geom_vline(xintercept = seq(0, 270, by = 45), color = "black", linewidth = .5, alpha = 0.8) +
+  geom_hline(yintercept = seq(0, 8, by = 1), color = "black", linewidth = .5, alpha = 0.8) +
+  theme_dark() +
+    scale_x_continuous(breaks = breaks_width(45)) +
+    scale_y_continuous(breaks = breaks_width(1), limits = c(0,8)) +
+    scale_color_manual(values = c("M" = "blue", "F" = "red", "Mx" = "green")) +
+  labs(
+    title = "p4p Ratio by Bodyweight",
+    x = "Bodyweight-(kg)",
+    y = "p4p Ratio"
+  ) +
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1.5, linetype = "longdash"),
+        axis.text = element_text(face = "bold"))
+
+leaders_general(power, "p4p")
+  
+
+```
+
+
+
+### Total
+
+
+
+```{r}
+power %>% 
+ ggplot(aes(x = BodyweightKg, y = TotalKg)) +
+  geom_smooth(aes(color = Sex, linetype = Sex), method = "gam", se = FALSE) +
+  geom_vline(xintercept = seq(0, 270, by = 45), color = "black", linewidth = .5, alpha = 0.8) +
+  geom_hline(yintercept = seq(0, 1300, by = 200), color = "black", linewidth = .5, alpha = 0.8) +
+  theme_dark() +
+    scale_x_continuous(breaks = breaks_width(45)) +
+    scale_y_continuous(breaks = breaks_width(200), limits = c(0,NA)) +
+    scale_color_manual(values = c("M" = "blue", "F" = "red", "Mx" = "green")) +
+  labs(
+    title = "Total by Bodyweight",
+    x = "Bodyweight-(kg)",
+    y = "Total-(kg)"
+  ) +
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1.5, linetype = "longdash"),
+        axis.text = element_text(face = "bold"))
+
+leaders_general(power, "TotalKg")
+```
+
+
+
+### Conclusion
+
+It seems that as we move to a lower-weight-class, the potential for greater p4p strength increases when looking at elite lifters. However, as we move to a higher-weight-class, p4p decreases, but total increases. While these Rate-Of-Change's are not proportional to one-another, they are somewhat perpendicular. This might be because strength doesn't correlate to Weight directly, moreover, what "type" of weight the lifter might have. A lifter with dense, muscular/skeletal composition on average, should be arguably stronger then one that consists of mostly adipose tissue. While these lifters can weigh the same, it is more likely for the lifter with the most **active** weight to lift more then the lifter with **passive** weight.
+
+However, it is important to keep in mind that Weight is not a direct indicator of Strength. Sometimes too much weight can be detrimental to a lifter. An example of this are Powerlifting meets that give you points based on p4p, rather then total weight lifted. In some competitions, a lifter can be evaluated based on their p4p ratio, rather then their total. Too much weight in this type of lift can actually hinder the success of an aspiring power-lifter.
+
